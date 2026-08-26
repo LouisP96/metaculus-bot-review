@@ -4,7 +4,7 @@ Review how a Metaculus forecasting bot performed on the questions it forecast.
 
 `bot-review` builds a table of how your bot's forecasts turned out and attaches the reports it
 posted, so you can see what it was thinking on the questions it got wrong. Everything is
-read-only. All it needs is `METACULUS_TOKEN`.
+read-only and requires no LLM spend. All it needs is `METACULUS_TOKEN`.
 
 It reads the reports your bot published as Metaculus comments, so it works whether or not the
 bot saved anything locally. It parses only the format
@@ -77,9 +77,8 @@ print(get_trace(44328, section="research"))
 
 ## Agent skill
 
-[`skill/SKILL.md`](skill/SKILL.md) drives the whole loop with an agent: build the table, pick
-the questions worth investigating, read the reports cheapest-first, and write the review. It
-budgets reading by section, since a research section runs to tens of thousands of characters.
+[`skill/SKILL.md`](skill/SKILL.md) drives the whole loop with an agent which builds the table, decides on
+the questions worth investigating, reads the reports and writes the review.
 
 Copy it into your bot's repo to use it with Claude Code:
 
