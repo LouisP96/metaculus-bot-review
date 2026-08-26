@@ -4,8 +4,7 @@ Review how a Metaculus forecasting bot performed on the questions it forecast.
 
 `bot-review` builds a table of how your bot's forecasts turned out and attaches the reports it
 posted, so you can see what it was thinking on the questions it got wrong. Everything is
-read-only: it makes no forecasts, spends nothing on LLMs, and publishes nothing. All it needs
-is `METACULUS_TOKEN`.
+read-only. All it needs is `METACULUS_TOKEN`.
 
 It reads the reports your bot published as Metaculus comments, so it works whether or not the
 bot saved anything locally. It parses only the format
@@ -42,8 +41,9 @@ peer for the AI benchmark tournaments, time-averaged peer for the Metaculus Cup.
 
 The JSON adds per-question detail: the official scores, the bot's forecast, and one `RunTrace`
 per run taken from the comment that run posted — each forecaster's prediction, the run time,
-cost and minutes where the bot leaves that metadata in. `QuestionOutcome.trace` picks the run
-that was standing when the question was spot scored, which is the one that earned the score.
+and, when the bot publishes its cost metadata, what the run cost and how long it took.
+`QuestionOutcome.trace` picks the run that was standing when the question was spot scored,
+which is the one that earned the score.
 
 ## Reading the reasoning
 
