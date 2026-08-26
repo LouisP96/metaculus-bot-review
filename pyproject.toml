@@ -6,6 +6,9 @@ authors = ["Louis Prosser"]
 readme = "README.md"
 license = "MIT"
 packages = [{ include = "metaculus_bot_review" }]
+homepage = "https://github.com/LouisP96/metaculus-bot-review"
+repository = "https://github.com/LouisP96/metaculus-bot-review"
+keywords = ["metaculus", "forecasting", "bot", "review"]
 
 [tool.poetry.dependencies]
 python = "^3.11"
