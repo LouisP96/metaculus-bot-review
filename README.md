@@ -75,6 +75,22 @@ print(build_summary(table))
 print(get_trace(44328, section="research"))
 ```
 
+## Agent skill
+
+[`skill/SKILL.md`](skill/SKILL.md) drives the whole loop with an agent: build the table, pick
+the questions worth investigating, read the reports cheapest-first, and write the review. It
+budgets reading by section, since a research section runs to tens of thousands of characters.
+
+Copy it into your bot's repo to use it with Claude Code:
+
+```bash
+mkdir -p .claude/skills/review-bot
+curl -o .claude/skills/review-bot/SKILL.md \
+    https://raw.githubusercontent.com/LouisP96/metaculus-bot-review/main/skill/SKILL.md
+```
+
+Then ask it to review the bot.
+
 ## Rate limits
 
 Metaculus rate-limits at roughly 5 requests per second. The CLI spaces requests by 0.7s;
