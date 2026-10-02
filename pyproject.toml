@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "metaculus-bot-review"
-version = "0.1.1"
+version = "0.1.2"
 description = "Review how a Metaculus forecasting bot performed on the questions it forecast"
 authors = ["Louis Prosser"]
 readme = "README.md"
@@ -12,7 +12,7 @@ keywords = ["metaculus", "forecasting", "bot", "review"]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-forecasting-tools = ">=0.2.92,<0.3.0"
+forecasting-tools = ">=0.2.92"
 pydantic = "^2.0"
 python-dotenv = "^1.0"
 requests = "^2.31"

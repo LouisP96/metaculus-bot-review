@@ -14,6 +14,7 @@ COMMENT_JSON = {
     "created_at": "2026-07-24T20:49:49.595398Z",
     "text": "# SUMMARY\n*Final Prediction*: 20.0%",
     "is_private": True,
+    "is_text_archived": False,
     "included_forecast": {"start_time": "2026-07-24T20:49:44.998152Z"},
     "parent_id": None,
 }

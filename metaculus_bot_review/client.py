@@ -72,6 +72,22 @@ class ReviewClient(MetaculusClient):
         return json.loads(response.content)["results"]
 
     @retry_with_exponential_backoff()
+    def get_comment(self, comment_id: int) -> Comment:
+        """
+        One comment with its full text, including archived text the list endpoint cuts short.
+
+        :param comment_id: the comment's id
+        """
+        self._sleep_between_requests()
+        response = requests.get(
+            f"{self.base_url}/comments/{comment_id}/",
+            **self._get_auth_headers(),  # type: ignore
+            timeout=self.timeout,
+        )
+        raise_for_status_with_additional_info(response)
+        return Comment.from_metaculus_api_json(json.loads(response.content))
+
+    @retry_with_exponential_backoff()
     def get_project_leaderboard(self, project_id: int) -> Leaderboard:
         """
         The primary leaderboard for a project, including your own entry.

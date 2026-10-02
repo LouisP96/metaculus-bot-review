@@ -15,6 +15,7 @@ class Comment(BaseModel):
     created_at: datetime
     text: str
     is_private: bool
+    is_text_archived: bool
 
     @classmethod
     def from_metaculus_api_json(cls, comment_json: dict) -> Comment:
@@ -27,4 +28,5 @@ class Comment(BaseModel):
             created_at=comment_json["created_at"],
             text=comment_json["text"],
             is_private=comment_json["is_private"],
+            is_text_archived=comment_json["is_text_archived"],
         )

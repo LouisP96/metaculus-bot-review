@@ -39,6 +39,7 @@ def make_comment(
     post_id: int = 1,
     created_at: datetime = RUN_TIME,
     text: str = EXPLANATION,
+    is_text_archived: bool = False,
 ) -> Comment:
     return Comment(
         id=comment_id,
@@ -48,6 +49,7 @@ def make_comment(
         created_at=created_at,
         text=text,
         is_private=True,
+        is_text_archived=is_text_archived,
     )
 
 
@@ -156,6 +158,17 @@ class TestAttachTraces:
         assert [t.comment_id for t in first.traces] == [1]
         assert [t.comment_id for t in second.traces] == [2]
 
+    def test_archived_comments_on_table_posts_are_fetched_in_full(self):
+        question = make_question(1)
+        client = self.client_returning(
+            make_comment(post_id=1, text="stub", is_text_archived=True),
+            make_comment(post_id=2, text="stub", is_text_archived=True),
+        )
+        client.get_comment.return_value = make_comment(post_id=1)
+        attach_traces(make_table([question]), client)
+        client.get_comment.assert_called_once_with(1)
+        assert question.traces[0].forecasters
+
     def test_a_single_question_post_keeps_every_run(self):
         question = make_question(1)
         client = self.client_returning(
@@ -229,6 +242,11 @@ class TestGetTrace:
         text = get_trace(1, forecaster="R1:F2", client=client)
         assert "the second rationale" in text
         assert "the first rationale" not in text
+
+    def test_an_archived_comment_is_fetched_in_full(self):
+        client = self.client_returning(make_comment(text="stub", is_text_archived=True))
+        client.get_comment.return_value = make_comment()
+        assert "the research" in get_trace(1, "research", client=client)
 
     def test_reads_the_newest_comment_on_the_post(self):
         client = self.client_returning(

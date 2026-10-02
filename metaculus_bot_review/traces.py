@@ -75,6 +75,8 @@ def attach_traces(
     comments_by_post = defaultdict(list)
     for comment in comments:
         if comment.on_post in rows_by_post:
+            if comment.is_text_archived:
+                comment = client.get_comment(comment.id)
             comments_by_post[comment.on_post].append(comment)
     logger.info(
         f"Read {len(comments)} comments, {sum(map(len, comments_by_post.values()))} "
@@ -118,7 +120,10 @@ def get_trace(
     ]
     if not comments:
         return ""
-    text = max(comments, key=lambda comment: comment.created_at).text
+    latest = max(comments, key=lambda comment: comment.created_at)
+    text = (
+        client.get_comment(latest.id).text if latest.is_text_archived else latest.text
+    )
     if forecaster:
         return forecaster_rationales(text).get(forecaster, "")
     return split_sections(text).get(section, "")
