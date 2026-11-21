@@ -14,8 +14,8 @@ is read-only Metaculus API traffic. No forecasting, no publishing, no API spend.
   only reads.
 - **Never read a whole report.** Pull one section of one question with `show`.
 - **Ask before changing code.** Diagnose first, propose fixes in the review.
-- Metaculus rate-limits at roughly 5 requests/second and the client does not retry. A 429
-  means rerun the command.
+- Metaculus rate-limits at roughly 5 requests/second. The client retries a 429 a few times
+  with backoff; if the command still fails, wait a minute and rerun it.
 
 ## 1. Build the data
 
@@ -25,30 +25,40 @@ bot-review review --tournament <slug-or-id> \
 ```
 
 Also `--post <POST_ID> ...` for specific questions, `--resolved-since <DAYS>` for anything
-that resolved recently, `--from-json review.json` to re-render without refetching. Roughly one
-request per post.
+that resolved recently, `--from-json review.json` to re-render without refetching. Roughly
+three requests per post.
 
-Read the summary first, then `review.json` for per-question detail.
+Read the summary first. `review.json` holds every run of every question, so query it with
+`jq` rather than reading it whole:
+
+```bash
+jq -c '.questions[] | {post_id, title, resolution, scored_prediction: .trace.final_prediction,
+    scores, question_weight, comment_id: .trace.comment_id,
+    forecasters: (.trace.forecasters | length)}' review.json
+jq '.questions[] | select(.post_id == <POST_ID>)' review.json
+```
 
 ## 2. Pick questions to investigate
 
 Around ten, fewer once findings repeat. Most of the budget goes on the worst scores. Also:
 
 - **Forecasted but unscored while resolved** — annulled, or something odder.
-- **`traces` non-empty but `trace` null** — every run came after `spot_scoring_time`, so the
-  forecast was never counted.
+- **`traces` non-empty but `trace` null** — every run forecast after `spot_scoring_time`, so
+  the forecast was never counted.
 - **Fewer forecasters than the bot's usual** — compare `len(trace.forecasters)` across the
   table.
 - **`trace.truncated` true** — the comment hit Metaculus's size cap and only its opening
   survives. Report it as a lost trace; there is nothing to diagnose.
 - **No trace at all** — the bot never forecast, or never published a comment.
 
-Those four are mechanical: no reading needed. When one of them matches many questions, that is
-a single finding with a count, not a dozen questions to read.
+These are mechanical: no reading needed. Each is one `jq` select, e.g.
+`jq '[.questions[] | select(.trace.truncated) | .post_id]' review.json`. When one of them
+matches many questions, that is a single finding with a count, not a dozen questions to read.
 
 Rank on whichever score the leaderboard uses — the summary names it. Peer scores are relative
-to other forecasters, so negative means you did worse than the field, and the tournament score
-is the sum.
+to other forecasters, so negative means you did worse than the field. The tournament score is
+the sum of each question's score times its `question_weight`, and the summary ranks on that
+product.
 
 Well-scored questions are not routine reading; they rarely produce a fix. Read one only to
 test a hypothesis the losses raised, and only after checking whether the table can test it for
@@ -60,8 +70,9 @@ patterns you think you see.
 
 Stop as soon as the question is answered.
 
-**a. The trace** — free, already in `review.json`. Every forecaster's prediction, the count,
-the run time. A tight cluster that all missed points at a shared input or blind spot; a wide
+**a. The trace** — free, already in `review.json`. The final prediction that was scored,
+every forecaster's prediction, the count, the run time. `forecast` is the bot's latest
+forecast, which differs from the scored one when it forecast again after spot scoring. A tight cluster that all missed points at a shared input or blind spot; a wide
 spread that landed badly points at aggregation; one model alone and right is worth naming.
 
 **b. Search the research** — near-free. You know what the question resolved to, so search for

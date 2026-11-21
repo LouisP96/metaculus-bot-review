@@ -173,7 +173,7 @@ class TestFinalPrediction:
         assert final_prediction(MULTILINE_SUMMARY) == "- A: 60.00%\n- B: 40.00%"
 
     def test_absent(self):
-        assert final_prediction("# SUMMARY\nnothing here") == ""
+        assert final_prediction("# SUMMARY\nnothing here") is None
 
 
 class TestWasTruncated:

@@ -21,6 +21,7 @@ def make_question(
     resolution: str | None = "yes",
     project: str = "CupA",
     status: str = "resolved",
+    weight: float = 1.0,
 ) -> QuestionOutcome:
     return QuestionOutcome(
         post_id=post_id,
@@ -33,6 +34,7 @@ def make_question(
         actual_resolve_time=None,
         spot_scoring_time=None,
         options=None,
+        question_weight=weight,
         forecasted=forecasted,
         forecast={"probability_yes": 0.5} if forecasted else None,
         forecast_time=None,
@@ -146,6 +148,14 @@ def test_signed_formatting_and_leaderboard():
     assert "Rank: **3 / 50** (spot_peer_tournament)" in report
 
 
+def test_entries_without_a_rank_are_not_counted():
+    leaderboard = make_leaderboard()
+    unranked = leaderboard.entries[0].model_copy(update={"rank": None})
+    leaderboard.entries.append(unranked)
+    report = build_summary(make_table(leaderboard=leaderboard))
+    assert "Rank: **3 / 50**" in report
+
+
 def test_a_peer_tournament_is_ranked_on_peer_score():
     questions = [
         make_question(1, spot_peer=90.0, peer=-5.0),
@@ -157,18 +167,30 @@ def test_a_peer_tournament_is_ranked_on_peer_score():
             leaderboard=make_leaderboard(score_type="peer_tournament"),
         )
     )
-    assert "## Best 2 (by peer score)" in report
+    assert "## Best 2 (by weighted peer score)" in report
     assert report.split("## Best")[1].index("Q2") < report.split("## Best")[1].index(
         "Q1"
     )
     assert "+10.0 peer" in report
 
 
+def test_questions_are_ranked_on_score_times_weight():
+    questions = [
+        make_question(1, spot_peer=-40.0, weight=0.1),
+        make_question(2, spot_peer=-10.0),
+    ]
+    report = build_summary(make_table(questions=questions))
+    worst = report.split("## Worst")[1]
+    assert worst.index("Q2") < worst.index("Q1")
+    assert "-40.0 spot peer × 0.1 weight" in worst
+    assert "-10.0 spot peer · " in worst
+
+
 def test_an_unknown_score_type_falls_back_to_spot_peer():
     report = build_summary(
         make_table(leaderboard=make_leaderboard(score_type="comment_insight"))
     )
-    assert "## Best 4 (by spot peer score)" in report
+    assert "## Best 4 (by weighted spot peer score)" in report
 
 
 def test_mean_coverage_over_scored():
@@ -192,7 +214,7 @@ def test_questions_without_a_spot_peer_score_are_not_ranked():
     questions = [make_question(1, spot_peer=None, baseline=40.0), make_question(2, 5.0)]
     report = build_summary(make_table(questions=questions))
     assert "Scored: 2" in report
-    assert "## Best 1 (by spot peer score)" in report
+    assert "## Best 1 (by weighted spot peer score)" in report
     assert "Q1" not in report.split("## Best")[1]
 
 
@@ -205,5 +227,5 @@ def test_a_table_saved_to_json_renders_the_same_report():
 def test_no_scored_questions():
     questions = [make_question(1, scored=False, status="open")]
     report = build_summary(make_table(questions=questions, leaderboard=None))
-    assert "## Best 0 (by spot peer score)" in report
+    assert "## Best 0 (by weighted spot peer score)" in report
     assert "Mean coverage" not in report

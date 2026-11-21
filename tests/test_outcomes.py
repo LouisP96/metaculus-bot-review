@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from metaculus_bot_review import outcomes as outcomes_module
 from metaculus_bot_review.outcomes import (
     cdf_median,
+    get_outcomes_for_posts,
     get_recently_resolved_outcomes,
+    get_tournament_outcomes,
     outcomes_from_post,
     scale_internal,
     summarize_forecast,
@@ -107,6 +109,11 @@ class TestOutcomesFromPost:
         assert outcome.scores.spot_peer_score == -2.5
         assert outcome.project_slug == "a-tournament"
         assert outcome.url.endswith("/questions/1/")
+        assert outcome.question_weight == 1.0
+
+    def test_question_weight_is_read(self):
+        (outcome,) = outcomes_from_post(make_binary_post(question_weight=0.25))
+        assert outcome.question_weight == 0.25
 
     def test_resolved_question_with_null_resolution(self):
         post = make_binary_post(
@@ -124,7 +131,7 @@ class TestOutcomesFromPost:
     def test_annulled_question(self):
         post = make_binary_post(resolution="annulled", my_forecasts={})
         (outcome,) = outcomes_from_post(post)
-        assert outcome.was_annulled
+        assert outcome.resolution == "annulled"
         assert not outcome.forecasted
 
     def test_unforecasted_question(self):
@@ -166,6 +173,37 @@ class TestOutcomesFromPost:
 
     def test_notebooks_are_skipped(self):
         assert outcomes_from_post({"id": 4, "notebook": {}}) == []
+
+
+class TestOutcomesForPosts:
+    def test_a_fetched_group_post_keeps_every_subquestion(self):
+        subquestion = make_binary_post()["question"]
+        client = MagicMock()
+        client.get_post_json.return_value = {
+            "id": 2,
+            "projects": {},
+            "group_of_questions": {
+                "questions": [
+                    dict(subquestion, id=201, label="a"),
+                    dict(subquestion, id=202, label="b"),
+                ]
+            },
+        }
+        outcomes = get_outcomes_for_posts([2], client)
+        assert [(o.question_id, o.group_label) for o in outcomes] == [
+            (201, "a"),
+            (202, "b"),
+        ]
+
+
+class TestTournamentOutcomes:
+    def test_skips_unforecasted_questions_by_default(self):
+        client = MagicMock()
+        client.get_questions_matching_filter = AsyncMock(return_value=[])
+        client.get_current_user_id.return_value = 7
+        get_tournament_outcomes("a-tournament", client)
+        api_filter = client.get_questions_matching_filter.call_args.args[0]
+        assert api_filter.is_previously_forecasted_by_user
 
 
 class TestRecentlyResolved:

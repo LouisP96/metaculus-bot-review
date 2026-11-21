@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from forecasting_tools.helpers.metaculus_client import ApiFilter
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from metaculus_bot_review.client import ReviewClient
 from metaculus_bot_review.leaderboard import Leaderboard
@@ -42,6 +42,7 @@ class RunTrace(BaseModel):
     comment_id: int
     run_time: datetime
     question_text: str | None
+    final_prediction: str | None
     forecasters: list[dict[str, Any]]
     cost: float | None
     minutes: float | None
@@ -61,6 +62,7 @@ class QuestionOutcome(BaseModel):
     actual_resolve_time: datetime | None
     spot_scoring_time: datetime | None
     options: list[str] | None
+    question_weight: float
     group_label: str | None = None
     conditional_branch: str | None = None
     forecasted: bool
@@ -72,10 +74,7 @@ class QuestionOutcome(BaseModel):
     project_name: str | None
     traces: list[RunTrace] = []
 
-    @property
-    def was_annulled(self) -> bool:
-        return self.resolution == "annulled"
-
+    @computed_field
     @property
     def trace(self) -> RunTrace | None:
         """The run standing when the question was spot scored, if any was."""
@@ -171,6 +170,7 @@ def _question_outcome(
         actual_resolve_time=question_json.get("actual_resolve_time"),
         spot_scoring_time=question_json.get("spot_scoring_time"),
         options=options,
+        question_weight=question_json.get("question_weight", 1.0),
         forecasted=bool(latest),
         forecast=summarize_forecast(
             question_type, latest.get("forecast_values"), options, scaling
@@ -220,11 +220,7 @@ def get_outcomes_for_posts(
     client = client or ReviewClient()
     outcomes: list[QuestionOutcome] = []
     for post_id in post_ids:
-        fetched = client.get_question_by_post_id(
-            post_id, group_question_mode="unpack_subquestions"
-        )
-        questions = fetched if isinstance(fetched, list) else [fetched]
-        outcomes.extend(outcomes_from_post(questions[0].api_json))
+        outcomes.extend(outcomes_from_post(client.get_post_json(post_id)))
     return outcomes
 
 
@@ -266,7 +262,7 @@ def get_recently_resolved_outcomes(
 def get_tournament_outcomes(
     tournament: int | str,
     client: ReviewClient | None = None,
-    forecasted_only: bool = False,
+    forecasted_only: bool = True,
 ) -> OutcomeTable:
     """
     Fetch the questions in a tournament and how the bot did on each.

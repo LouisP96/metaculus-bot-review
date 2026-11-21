@@ -82,11 +82,12 @@ def parse_forecasters(summary: str) -> list[dict]:
     return forecasters
 
 
-def final_prediction(summary: str) -> str:
+def final_prediction(summary: str) -> str | None:
+    """The aggregated prediction as it was written in the summary."""
     match = FINAL_PREDICTION_PATTERN.search(summary)
-    return match.group(1).strip() if match else ""
+    return match.group(1).strip() if match else None
 
 
 def was_truncated(explanation: str) -> bool:
     """Whether the explanation hit the comment size cap and lost its tail."""
-    return "has been truncated" in explanation
+    return "The comment size exceeded max size and has been truncated" in explanation

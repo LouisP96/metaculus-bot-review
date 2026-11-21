@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "metaculus-bot-review"
-version = "0.1.2"
+version = "0.1.3"
 description = "Review how a Metaculus forecasting bot performed on the questions it forecast"
 authors = ["Louis Prosser"]
 readme = "README.md"

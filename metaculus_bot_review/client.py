@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import cache
 from typing import Any
 
 import requests
@@ -22,28 +23,40 @@ logger = logging.getLogger(__name__)
 class ReviewClient(MetaculusClient):
     MAX_COMMENTS_FROM_COMMENT_API_PER_REQUEST = 100
 
+    @cache
+    def get_current_user_id(self) -> int:
+        """The id of the account the token belongs to, looked up once per client."""
+        return super().get_current_user_id()
+
+    @retry_with_exponential_backoff()
+    def get_post_json(self, post_id: int) -> dict:
+        """
+        A post as the API returns it, including your own forecasts and scores.
+
+        :param post_id: post id, as it appears in question urls
+        """
+        self._sleep_between_requests()
+        response = requests.get(
+            f"{self.base_url}/posts/{post_id}/",
+            **self._get_auth_headers(),  # type: ignore
+            timeout=self.timeout,
+        )
+        raise_for_status_with_additional_info(response)
+        return json.loads(response.content)
+
     def get_own_comments(
-        self,
-        post_id: int | None = None,
-        is_private: bool = True,
-        user_id: int | None = None,
-        max_comments: int = 500,
+        self, post_id: int | None = None, is_private: bool = True
     ) -> list[Comment]:
         """
-        Comments you posted, newest first. The API only allows listing your own.
+        All comments you posted. The API only allows listing your own.
 
         :param post_id: only return comments on this post
         :param is_private: whether to return private or public comments
-        :param user_id: your own user id, looked up if not given
-        :param max_comments: stop paging once this many are collected
         """
-        author_id = user_id if user_id is not None else self.get_current_user_id()
+        author_id = self.get_current_user_id()
+        page_size = self.MAX_COMMENTS_FROM_COMMENT_API_PER_REQUEST
         comments: list[Comment] = []
-        while len(comments) < max_comments:
-            page_size = min(
-                self.MAX_COMMENTS_FROM_COMMENT_API_PER_REQUEST,
-                max_comments - len(comments),
-            )
+        while True:
             params: dict[str, Any] = {
                 "author": author_id,
                 "is_private": str(is_private).lower(),

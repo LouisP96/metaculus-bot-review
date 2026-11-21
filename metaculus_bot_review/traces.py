@@ -7,7 +7,6 @@ run standing when the question was spot scored.
 
 from __future__ import annotations
 
-import logging
 import re
 from collections import defaultdict
 
@@ -15,13 +14,12 @@ from metaculus_bot_review.client import ReviewClient
 from metaculus_bot_review.comment import Comment
 from metaculus_bot_review.outcomes import OutcomeTable, RunTrace
 from metaculus_bot_review.report_parsing import (
+    final_prediction,
     forecaster_rationales,
     parse_forecasters,
     split_sections,
     was_truncated,
 )
-
-logger = logging.getLogger(__name__)
 
 COST_PATTERN = re.compile(r"^\*Total Cost\*:\s*\$([\d.]+)", re.MULTILINE)
 MINUTES_PATTERN = re.compile(r"^\*Time Spent\*:\s*([\d.]+) minutes", re.MULTILINE)
@@ -38,6 +36,7 @@ def reduce_comment(comment: Comment) -> RunTrace:
         comment_id=comment.id,
         run_time=comment.created_at,
         question_text=question.group(1).strip() if question else None,
+        final_prediction=final_prediction(summary),
         forecasters=parse_forecasters(summary),
         cost=float(cost.group(1)) if cost else None,
         minutes=float(minutes.group(1)) if minutes else None,
@@ -45,45 +44,33 @@ def reduce_comment(comment: Comment) -> RunTrace:
     )
 
 
-def attach_traces(
-    table: OutcomeTable,
-    client: ReviewClient | None = None,
-    max_comments: int = 500,
-) -> None:
-    """
-    Fill in ``traces`` on every question in the table.
+def _own_comments_on_post(client: ReviewClient, post_id: int) -> list[Comment]:
+    """Your private and public comments on a post."""
+    return [
+        comment
+        for is_private in (True, False)
+        for comment in client.get_own_comments(post_id=post_id, is_private=is_private)
+    ]
 
-    Bots publish their reports privately or publicly depending on how they are
-    configured, so both are fetched.
+
+def attach_traces(table: OutcomeTable, client: ReviewClient | None = None) -> None:
+    """
+    Fill in ``traces`` on every question in the table from your comments on its post.
 
     :param table: the table to attach to, modified in place
     :param client: client to fetch with, created from the environment if not given
-    :param max_comments: how far back to page, per privacy setting
     """
     client = client or ReviewClient()
-    user_id = client.get_current_user_id()
-    comments = [
-        comment
-        for is_private in (True, False)
-        for comment in client.get_own_comments(
-            is_private=is_private, user_id=user_id, max_comments=max_comments
-        )
-    ]
     rows_by_post = defaultdict(list)
     for outcome in table.questions:
         rows_by_post[outcome.post_id].append(outcome)
-    comments_by_post = defaultdict(list)
-    for comment in comments:
-        if comment.on_post in rows_by_post:
-            if comment.is_text_archived:
-                comment = client.get_comment(comment.id)
-            comments_by_post[comment.on_post].append(comment)
-    logger.info(
-        f"Read {len(comments)} comments, {sum(map(len, comments_by_post.values()))} "
-        f"of them on the {len(rows_by_post)} posts in the table"
-    )
     for post_id, rows in rows_by_post.items():
-        runs = [reduce_comment(c) for c in comments_by_post[post_id]]
+        runs = [
+            reduce_comment(
+                client.get_comment(comment.id) if comment.is_text_archived else comment
+            )
+            for comment in _own_comments_on_post(client, post_id)
+        ]
         for outcome in rows:
             outcome.traces = (
                 runs
@@ -102,28 +89,26 @@ def get_trace(
     """
     One part of a report the bot posted, by default its latest on the post.
 
+    Raises if the post has no comments from you, the comment is on another post,
+    or the report has no such section or forecaster.
+
     :param post_id: post id, as it appears in question urls
     :param section: summary, research or forecasts
     :param forecaster: a key like ``R1:F2``, to read that rationale instead
-    :param comment_id: a trace's ``comment_id``, to read the run that scored
+    :param comment_id: a trace's ``comment_id``, to read that run instead
     :param client: client to fetch with, created from the environment if not given
     """
     client = client or ReviewClient()
-    user_id = client.get_current_user_id()
-    comments = [
-        comment
-        for is_private in (True, False)
-        for comment in client.get_own_comments(
-            post_id=post_id, is_private=is_private, user_id=user_id
+    if comment_id is None:
+        comments = _own_comments_on_post(client, post_id)
+        if not comments:
+            raise ValueError(f"You have no comments on post {post_id}")
+        comment_id = max(comments, key=lambda comment: comment.created_at).id
+    comment = client.get_comment(comment_id)
+    if comment.on_post != post_id:
+        raise ValueError(
+            f"Comment {comment_id} is on post {comment.on_post}, not {post_id}"
         )
-        if comment_id is None or comment.id == comment_id
-    ]
-    if not comments:
-        return ""
-    latest = max(comments, key=lambda comment: comment.created_at)
-    text = (
-        client.get_comment(latest.id).text if latest.is_text_archived else latest.text
-    )
     if forecaster:
-        return forecaster_rationales(text).get(forecaster, "")
-    return split_sections(text).get(section, "")
+        return forecaster_rationales(comment.text)[forecaster]
+    return split_sections(comment.text)[section]

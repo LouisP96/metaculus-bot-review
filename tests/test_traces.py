@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
+
+import pytest
 
 from metaculus_bot_review.comment import Comment
 from metaculus_bot_review.outcomes import OutcomeTable, QuestionOutcome
@@ -65,6 +68,7 @@ def make_question(post_id: int = 1, title: str = "Q1") -> QuestionOutcome:
         actual_resolve_time=None,
         spot_scoring_time=None,
         options=None,
+        question_weight=1.0,
         forecasted=True,
         forecast={"probability_yes": 0.2},
         forecast_time=None,
@@ -96,6 +100,9 @@ class TestReduceComment:
         assert [f["key"] for f in trace.forecasters] == ["R1:F1", "R1:F2"]
         assert trace.forecasters[1]["prediction"] == "30.0%"
 
+    def test_reads_the_final_prediction_of_the_run(self):
+        assert reduce_comment(make_comment()).final_prediction == "20.0%"
+
     def test_missing_metadata_is_none_not_an_error(self):
         trace = reduce_comment(make_comment(text="# SUMMARY\nnothing useful here"))
         assert trace.cost is None
@@ -108,46 +115,50 @@ class TestReduceComment:
         assert reduce_comment(make_comment(text=text)).truncated
 
 
-class TestAttachTraces:
-    def client_returning(self, *comments) -> MagicMock:
-        """A client whose comments are all private, as most bots post them."""
-        client = MagicMock()
-        client.get_own_comments.side_effect = lambda **kwargs: (
-            list(comments) if kwargs.get("is_private") else []
-        )
-        return client
+def client_returning(*comments: Comment) -> MagicMock:
+    """A client holding these comments, all private as most bots post them."""
+    client = MagicMock()
+    client.get_own_comments.side_effect = lambda post_id, is_private: (
+        [c for c in comments if c.on_post == post_id] if is_private else []
+    )
+    client.get_comment.side_effect = lambda comment_id: next(
+        c for c in comments if c.id == comment_id
+    )
+    return client
 
-    def test_comments_are_read_in_bulk_not_once_per_post(self):
-        questions = [make_question(1), make_question(2), make_question(3)]
-        client = self.client_returning(make_comment())
+
+class TestAttachTraces:
+    def test_comments_are_read_per_post_private_and_public(self):
+        questions = [make_question(1), make_question(2)]
+        client = client_returning()
         attach_traces(make_table(questions), client)
-        assert client.get_own_comments.call_count == 2
         assert [
-            c.kwargs["is_private"] for c in client.get_own_comments.call_args_list
-        ] == [
-            True,
-            False,
-        ]
+            (c.kwargs["post_id"], c.kwargs["is_private"])
+            for c in client.get_own_comments.call_args_list
+        ] == [(1, True), (1, False), (2, True), (2, False)]
 
     def test_public_comments_are_read_too(self):
         question = make_question(1)
         client = MagicMock()
-        client.get_own_comments.side_effect = lambda **kwargs: (
-            [] if kwargs.get("is_private") else [make_comment(comment_id=9)]
+        client.get_own_comments.side_effect = lambda post_id, is_private: (
+            [] if is_private else [make_comment(comment_id=9)]
         )
         attach_traces(make_table([question]), client)
         assert [t.comment_id for t in question.traces] == [9]
 
-    def test_comments_on_other_posts_are_ignored(self):
-        question = make_question(1)
-        client = self.client_returning(make_comment(post_id=1), make_comment(post_id=2))
-        attach_traces(make_table([question]), client)
-        assert len(question.traces) == 1
+    def test_each_question_gets_the_comments_on_its_own_post(self):
+        first, second = make_question(1), make_question(2)
+        client = client_returning(
+            make_comment(comment_id=1, post_id=1), make_comment(comment_id=2, post_id=2)
+        )
+        attach_traces(make_table([first, second]), client)
+        assert [t.comment_id for t in first.traces] == [1]
+        assert [t.comment_id for t in second.traces] == [2]
 
     def test_a_group_post_splits_its_comments_by_question_text(self):
         first = make_question(title="Q1")
         second = make_question(title="other")
-        client = self.client_returning(
+        client = client_returning(
             make_comment(comment_id=1),
             make_comment(
                 comment_id=2,
@@ -158,22 +169,17 @@ class TestAttachTraces:
         assert [t.comment_id for t in first.traces] == [1]
         assert [t.comment_id for t in second.traces] == [2]
 
-    def test_archived_comments_on_table_posts_are_fetched_in_full(self):
+    def test_archived_comments_are_fetched_in_full(self):
         question = make_question(1)
-        client = self.client_returning(
-            make_comment(post_id=1, text="stub", is_text_archived=True),
-            make_comment(post_id=2, text="stub", is_text_archived=True),
-        )
-        client.get_comment.return_value = make_comment(post_id=1)
+        client = client_returning(make_comment(text="stub", is_text_archived=True))
+        client.get_comment.side_effect = lambda comment_id: make_comment()
         attach_traces(make_table([question]), client)
         client.get_comment.assert_called_once_with(1)
         assert question.traces[0].forecasters
 
     def test_a_single_question_post_keeps_every_run(self):
         question = make_question(1)
-        client = self.client_returning(
-            make_comment(comment_id=1), make_comment(comment_id=2)
-        )
+        client = client_returning(make_comment(comment_id=1), make_comment(comment_id=2))
         attach_traces(make_table([question]), client)
         assert len(question.traces) == 2
 
@@ -223,50 +229,59 @@ class TestSelectingTheScoredRun:
         assert reloaded.questions[0].trace is not None
         assert reloaded.questions[0].trace.forecasters[0]["key"] == "R1:F1"
 
+    def test_the_scored_run_is_written_to_the_json(self):
+        table = make_table([self.question_with_runs(5, 0, 9)])
+        dumped = json.loads(table.model_dump_json())
+        assert dumped["questions"][0]["trace"]["comment_id"] == 0
+
 
 class TestGetTrace:
-    def client_returning(self, *comments) -> MagicMock:
-        """A client whose comments are all private, as most bots post them."""
-        client = MagicMock()
-        client.get_own_comments.side_effect = lambda **kwargs: (
-            list(comments) if kwargs.get("is_private") else []
-        )
-        return client
-
     def test_returns_the_asked_for_section(self):
-        client = self.client_returning(make_comment())
+        client = client_returning(make_comment())
         assert "the research" in get_trace(1, "research", client=client)
 
     def test_returns_one_forecaster_rationale(self):
-        client = self.client_returning(make_comment())
+        client = client_returning(make_comment())
         text = get_trace(1, forecaster="R1:F2", client=client)
         assert "the second rationale" in text
         assert "the first rationale" not in text
 
     def test_an_archived_comment_is_fetched_in_full(self):
-        client = self.client_returning(make_comment(text="stub", is_text_archived=True))
-        client.get_comment.return_value = make_comment()
+        client = client_returning(make_comment(text="stub", is_text_archived=True))
+        client.get_comment.side_effect = lambda comment_id: make_comment()
         assert "the research" in get_trace(1, "research", client=client)
 
     def test_reads_the_newest_comment_on_the_post(self):
-        client = self.client_returning(
+        client = client_returning(
             make_comment(comment_id=1, text=EXPLANATION.replace("the research", "old")),
             make_comment(comment_id=2, created_at=RUN_TIME + timedelta(hours=1)),
         )
         assert "the research" in get_trace(1, "research", client=client)
 
-    def test_reads_the_run_that_scored_when_given_its_comment_id(self):
-        client = self.client_returning(
+    def test_a_comment_id_is_fetched_directly(self):
+        client = client_returning(
             make_comment(
                 comment_id=1, text=EXPLANATION.replace("the research", "the scored run")
             ),
             make_comment(comment_id=2, created_at=RUN_TIME + timedelta(hours=1)),
         )
         assert "the scored run" in get_trace(1, "research", comment_id=1, client=client)
+        client.get_own_comments.assert_not_called()
 
-    def test_an_unknown_comment_id_returns_nothing(self):
-        client = self.client_returning(make_comment(comment_id=1))
-        assert get_trace(1, comment_id=99, client=client) == ""
+    def test_a_comment_on_another_post_raises(self):
+        client = client_returning(make_comment(comment_id=1, post_id=2))
+        with pytest.raises(ValueError, match="on post 2, not 1"):
+            get_trace(1, comment_id=1, client=client)
 
-    def test_a_post_with_no_comments(self):
-        assert get_trace(1, client=self.client_returning()) == ""
+    def test_a_post_with_no_comments_raises(self):
+        with pytest.raises(ValueError, match="no comments on post 1"):
+            get_trace(1, client=client_returning())
+
+    def test_an_unknown_forecaster_raises(self):
+        with pytest.raises(KeyError):
+            get_trace(1, forecaster="R1:F9", client=client_returning(make_comment()))
+
+    def test_a_missing_section_raises(self):
+        client = client_returning(make_comment(text="# SUMMARY\nonly this"))
+        with pytest.raises(KeyError):
+            get_trace(1, "research", client=client)

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+import json
+from unittest.mock import MagicMock, patch
+
+import pytest
+from forecasting_tools.helpers.metaculus_client import MetaculusClient
 
 from metaculus_bot_review.client import ReviewClient
 from metaculus_bot_review.comment import Comment
@@ -98,29 +102,51 @@ class TestLeaderboardParsing:
         assert entry is not None and entry.medal == "gold"
 
 
+class TestCurrentUserId:
+    def test_is_looked_up_once_per_client(self):
+        client = ReviewClient(token="a-token", sleep_seconds_between_requests=0)
+        with patch.object(
+            MetaculusClient, "get_current_user_id", return_value=7
+        ) as lookup:
+            assert client.get_current_user_id() == 7
+            assert client.get_current_user_id() == 7
+        lookup.assert_called_once()
+
+
+class TestGetPostJson:
+    def test_returns_the_post_as_the_api_sent_it(self):
+        response = MagicMock(status_code=200, content=json.dumps({"id": 1}).encode())
+        client = ReviewClient(
+            token="a-token", sleep_seconds_between_requests=0, sleep_jitter_seconds=0
+        )
+        with patch(
+            "metaculus_bot_review.client.requests.get", return_value=response
+        ) as get:
+            assert client.get_post_json(1) == {"id": 1}
+        assert get.call_args.args[0].endswith("/posts/1/")
+
+
 class TestGetOwnComments:
+    @pytest.fixture(autouse=True)
+    def user_id(self):
+        with patch.object(ReviewClient, "get_current_user_id", return_value=305884):
+            yield
+
     def client(self) -> ReviewClient:
         return ReviewClient(token="a-token", sleep_seconds_between_requests=0)
 
     def test_asks_for_private_comments_by_default(self):
         with patch.object(ReviewClient, "_get_comment_page", return_value=[]) as page:
-            self.client().get_own_comments(user_id=305884)
+            self.client().get_own_comments()
         assert page.call_args.args[0]["is_private"] == "true"
         assert page.call_args.args[0]["author"] == 305884
 
     def test_post_filter_is_only_sent_when_given(self):
         with patch.object(ReviewClient, "_get_comment_page", return_value=[]) as page:
-            self.client().get_own_comments(user_id=1)
+            self.client().get_own_comments()
             assert "post" not in page.call_args.args[0]
-            self.client().get_own_comments(user_id=1, post_id=44676)
+            self.client().get_own_comments(post_id=44676)
             assert page.call_args.args[0]["post"] == 44676
-
-    def test_supplied_user_id_avoids_the_lookup_request(self):
-        with patch.object(
-            ReviewClient, "_get_comment_page", return_value=[]
-        ), patch.object(ReviewClient, "get_current_user_id") as lookup:
-            self.client().get_own_comments(user_id=305884)
-        lookup.assert_not_called()
 
     def test_pages_until_a_short_page_arrives(self):
         full_page = [
@@ -131,16 +157,7 @@ class TestGetOwnComments:
             "_get_comment_page",
             side_effect=[full_page, [COMMENT_JSON]],
         ) as page:
-            comments = self.client().get_own_comments(user_id=1)
+            comments = self.client().get_own_comments()
         assert len(comments) == 101
         assert page.call_count == 2
         assert page.call_args_list[1].args[0]["offset"] == 100
-
-    def test_stops_at_max_comments_without_overfetching(self):
-        with patch.object(
-            ReviewClient, "_get_comment_page", return_value=[COMMENT_JSON] * 5
-        ) as page:
-            comments = self.client().get_own_comments(user_id=1, max_comments=5)
-        assert len(comments) == 5
-        assert page.call_args.args[0]["limit"] == 5
-        assert page.call_count == 1

@@ -38,10 +38,20 @@ def _project_label(outcome: QuestionOutcome) -> str:
     return outcome.project_name or outcome.project_slug or str(outcome.project_id)
 
 
+def _weighted_score(outcome: QuestionOutcome, metric: str) -> float:
+    return getattr(outcome.scores, metric) * outcome.question_weight
+
+
 def _question_line(rank: int, outcome: QuestionOutcome, metric: str) -> str:
     assert outcome.scores is not None
+    weight = (
+        ""
+        if outcome.question_weight == 1
+        else f" × {outcome.question_weight:.2g} weight"
+    )
     return (
-        f"{rank}. {_signed(getattr(outcome.scores, metric))} {_metric_label(metric)} · "
+        f"{rank}. {_signed(getattr(outcome.scores, metric))} "
+        f"{_metric_label(metric)}{weight} · "
         f"{_signed(outcome.scores.baseline_score)} baseline · "
         f"{outcome.question_type} · [{outcome.title}]({outcome.url})"
     )
@@ -52,9 +62,10 @@ def _overall_lines(table: OutcomeTable, scored: list[QuestionOutcome]) -> list[s
     leaderboard = table.leaderboard
     entry = leaderboard.user_entry if leaderboard else None
     if leaderboard is not None and entry is not None:
+        ranked_entries = sum(1 for e in leaderboard.entries if e.rank is not None)
         lines += [
             (
-                f"- Rank: **{entry.rank} / {len(leaderboard.entries)}** "
+                f"- Rank: **{entry.rank} / {ranked_entries}** "
                 f"({leaderboard.score_type})"
             ),
             (
@@ -101,7 +112,7 @@ def build_summary(table: OutcomeTable, top_n: int = 10) -> str:
             if outcome.scores is not None
             and getattr(outcome.scores, metric) is not None
         ),
-        key=lambda outcome: getattr(outcome.scores, metric),
+        key=lambda outcome: _weighted_score(outcome, metric),
         reverse=True,
     )
 
@@ -130,8 +141,8 @@ def build_summary(table: OutcomeTable, top_n: int = 10) -> str:
         )
     lines.append(
         f"- Traced: {sum(1 for o in forecasted if o.trace)} "
-        f"({sum(1 for o in forecasted if o.traces and not o.trace)} ran only after "
-        "spot scoring time)"
+        f"({sum(1 for o in forecasted if o.traces and not o.trace)} forecast only "
+        "after spot scoring time)"
     )
 
     lines += ["", "### By tournament", ""]
@@ -139,7 +150,7 @@ def build_summary(table: OutcomeTable, top_n: int = 10) -> str:
         scored_here = sum(1 for o in scored if _project_label(o) == label)
         lines.append(f"- {label}: {count} questions ({scored_here} scored)")
 
-    metric_label = f"{_metric_label(metric)} score"
+    metric_label = f"weighted {_metric_label(metric)} score"
     lines += ["", f"## Best {min(top_n, len(ranked))} (by {metric_label})", ""]
     lines += [_question_line(i, o, metric) for i, o in enumerate(ranked[:top_n], 1)]
     lines += ["", f"## Worst {min(top_n, len(ranked))} (by {metric_label})", ""]

@@ -17,9 +17,10 @@ on any bot built on the framework.
 pip install metaculus-bot-review
 ```
 
-Or with poetry:
+Or with uv or poetry:
 
 ```bash
+uv add metaculus-bot-review
 poetry add metaculus-bot-review
 ```
 
@@ -37,13 +38,14 @@ bot-review review --from-json review.json --top 3  # re-render without refetchin
 
 The markdown summary gives your leaderboard standing, how many questions were forecast and
 scored, and the best and worst questions ranked on whichever score the leaderboard uses — spot
-peer for the AI benchmark tournaments, time-averaged peer for the Metaculus Cup.
+peer for the AI benchmark tournaments, time-averaged peer for the Metaculus Cup — times each
+question's weight, since that is what the tournament score adds up.
 
-The JSON adds per-question detail: the official scores, the bot's forecast, and one `RunTrace`
-per run taken from the comment that run posted — each forecaster's prediction, the run time,
-and, when the bot publishes its cost metadata, what the run cost and how long it took.
-`QuestionOutcome.trace` picks the run that was standing when the question was spot scored,
-which is the one that earned the score.
+The JSON adds per-question detail: the official scores and question weight, the bot's forecast,
+and one `RunTrace` per run taken from the comment that run posted — the final prediction,
+each forecaster's prediction, when the run forecast, and, when the bot publishes its cost
+metadata, what the run cost and how long it took. `trace` is the run whose forecast was standing when the question was
+spot scored, which is the one that earned the score.
 
 ## Reading the reasoning
 
@@ -92,8 +94,8 @@ Then ask it to review the bot.
 
 ## Rate limits
 
-Metaculus rate-limits at roughly 5 requests per second. The CLI spaces requests by 0.7s;
-change it with `--seconds-between-requests`.
+Metaculus rate-limits at roughly 5 requests per second. The CLI waits 0.7s plus up to 1s of
+random jitter between requests; change the 0.7s with `--seconds-between-requests`.
 
 ## License
 
